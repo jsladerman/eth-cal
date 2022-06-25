@@ -4,11 +4,11 @@ const ConnectWalletButton = ({
   onPressLogout,
   onPressConnect,
   loading,
-  address,
+  accounts,
 }) => {
   return (
     <div>
-      {address && !loading ? (
+      {!loading && accounts !== null ? (
         <button onClick={onPressLogout} className={styles["connect-wallet"]}>
           Disconnect
         </button>
