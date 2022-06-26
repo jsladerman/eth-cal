@@ -3,6 +3,7 @@ import { randomBytes, createCipheriv, createDecipheriv } from "crypto";
 import ICalParser from "ical-js-parser";
 import "./App.css";
 import ConnectWalletButton from "./components/ConnectWalletButton";
+import { decrypt } from "@metamask/eth-sig-util";
 
 const App = () => {
   const backEndURL = process.env.REACT_APP_BACKEND_URL;
@@ -11,7 +12,7 @@ const App = () => {
   const ethereum = window.ethereum;
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState(null);
-  const [encryptedMessage, setEncryptedMessage] = useState(null);
+  const [cidList, setCidList] = useState(null);
 
   const onPressConnect = async () => {
     setLoading(true);
@@ -26,12 +27,12 @@ const App = () => {
           const publicKey = await getEncryptionPublicKey(newAccounts[0]);
           registerAccount(newAccounts[0], publicKey);
         }
+        fetchCIDs(newAccounts[0]);
         setAccounts(newAccounts);
       }
     } catch (error) {
       console.log(error);
     }
-
     setLoading(false);
   };
 
@@ -42,35 +43,6 @@ const App = () => {
       method: "eth_getEncryptionPublicKey",
       params: [account],
     });
-  };
-
-  const encrypt = (data) => {
-    getEncryptionPublicKey(accounts[0])
-      .then((result) => {
-        const message = ethUtil.bufferToHex(
-          Buffer.from(
-            JSON.stringify(
-              sigUtil.encrypt({
-                publicKey: result,
-                data: data,
-                version: "x25519-xsalsa20-poly1305",
-              })
-            ),
-            "utf8"
-          )
-        );
-        console.log(result);
-        setEncryptedMessage(message);
-        console.log("Encrypted message: " + message);
-      })
-      .catch((error) => {
-        if (error.code === 4001) {
-          // EIP-1193 userRejectedRequest error
-          console.log("We can't encrypt anything without the key.");
-        } else {
-          console.error(error);
-        }
-      });
   };
 
   const aesDecrypt = ({ iv, cipherText }, aesKey) => {
@@ -85,28 +57,57 @@ const App = () => {
     ]).toString();
   };
 
-  const decrypt = () => {
-    ethereum
+  const decryptKey = async (encryptedKey) => {
+    return await ethereum
       .request({
         method: "eth_decrypt",
-        params: [encryptedMessage, accounts[0]],
+        params: [encryptedKey, accounts[0]],
       })
-      .then((decryptedMessage) =>
-        console.log("Decrypted message: ", decryptedMessage)
-      )
       .catch((error) => console.log(error.message));
   };
 
-  const fetchFromIPFS = (cid, filename) => {
-    fetch("https://ipfs.io/ipfs/" + cid + "/" + filename)
-      .then((response) => response.text())
-      .then((data) => console.log(data));
+  const decryptEverything = async () => {
+    // cidList.forEach(async (cid) => {
+
+    const cid = cidList[1];
+    const encryptedKey = await fetchFromIPFS(cid, "aes");
+    const decryptedKey = await decryptKey(encryptedKey);
+    console.log(decryptedKey);
+
+    const icsPayload = await fetchFromIPFS(cid, "ics", true);
+    console.log(icsPayload);
+    const icsFile = aesDecrypt(
+      { iv: icsPayload.iv, cipherText: icsPayload.cipherText },
+      decryptedKey
+    );
+    console.log(icsFile);
+
+    // hacky but it's a hackathon
+    const element = document.createElement("a");
+    const file = new Blob([icsFile], {
+      type: "text/plain",
+    });
+    element.href = URL.createObjectURL(file);
+    element.download = "eth-cal.ics";
+    document.body.appendChild(element);
+    element.click();
+
+    // });
+  };
+
+  const fetchFromIPFS = async (cid, filename, json = false) => {
+    return await fetch("https://ipfs.io/ipfs/" + cid + "/" + filename).then(
+      (response) => (json ? response.json() : response.text())
+    );
   };
 
   const fetchCIDs = (walletAddress) => {
     fetch(backEndURL + "ipfsCids/" + walletAddress)
       .then((response) => response.json())
-      .then((data) => console.log(data));
+      .then((data) => {
+        setCidList(data);
+        console.log(data);
+      });
   };
 
   const isRegistered = async (walletAddress) => {
@@ -144,10 +145,10 @@ const App = () => {
       <header className="App-header">
         {!loading && accounts !== null ? (
           <div>
-            <button onClick={() => registerAccount("0x01", "key")}>
+            {/* <button onClick={() => registerAccount("0x01", "key")}>
               Register
-            </button>
-            <button
+            </button> */}
+            {/* <button
               onClick={() =>
                 fetchFromIPFS(
                   "bafybeigr6aklj3xkofv7d55llvf7vgkk47omiiwfppgnsgirkhhx7mca34",
@@ -156,14 +157,16 @@ const App = () => {
               }
             >
               Fetch File
-            </button>
-            <button onClick={() => fetchCIDs(accounts[0])}>Get CIDs</button>
+            </button> */}
+            {/* <button onClick={() => fetchCIDs(accounts[0])}>Get CIDs</button> */}
             {/* <button onClick={() => fetchCIDs('asdf')}>Get CIDs</button> */}
-            <button onClick={() => console.log(accounts[0])}>
+            {/* <button onClick={() => console.log(accounts[0])}>
               Current Account
+            </button> */}
+            {/* <button onClick={() => encrypt("hello world!")}>Encrypt</button> */}
+            <button style={downloadBtnStyle} onClick={decryptEverything}>
+              Download Calendar
             </button>
-            <button onClick={() => encrypt("hello world!")}>Encrypt</button>
-            <button onClick={decrypt}>Decrypt</button>
           </div>
         ) : null}
         <ConnectWalletButton
@@ -175,6 +178,20 @@ const App = () => {
       </header>
     </div>
   );
+};
+
+const downloadBtnStyle = {
+  backgroundColor: "#4CAF50",
+  marginBottom: "58px",
+  cursor: "pointer",
+  border: "none",
+  borderRadius: "38px",
+  color: "white",
+  padding: "55px 72px",
+  textAlign: "center",
+  fontWeight: "bold",
+  fontFamily: "Comic Sans MS",
+  fontSize: "46px",
 };
 
 export default App;
