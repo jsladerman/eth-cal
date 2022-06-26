@@ -6,6 +6,7 @@ import ConnectWalletButton from "./components/ConnectWalletButton";
 import { isLabelWithInternallyDisabledControl } from "@testing-library/user-event/dist/utils";
 
 const App = () => {
+  const backEndURL = process.env.REACT_APP_BACKEND_URL;
   const ethUtil = require("ethereumjs-util");
   const sigUtil = require("@metamask/eth-sig-util");
   const ethereum = window.ethereum;
@@ -22,7 +23,10 @@ const App = () => {
         const newAccounts = await window.ethereum.request({
           method: "eth_requestAccounts",
         });
-        // const address = Web3.utils.toChecksumAddress(newAccounts[0]);
+        if (!(await isRegistered(newAccounts[0]))) {
+          const publicKey = await getEncryptionPublicKey(newAccounts[0]);
+          registerAccount(newAccounts[0], publicKey);
+        }
         setAccounts(newAccounts);
       }
     } catch (error) {
@@ -34,25 +38,29 @@ const App = () => {
 
   const onPressLogout = () => setAccounts(null);
 
-  const encrypt = () => {
-    ethereum
-      .request({
-        method: "eth_getEncryptionPublicKey",
-        params: [accounts[0]], // you must have access to the specified account
-      })
+  const getEncryptionPublicKey = (account) => {
+    return ethereum.request({
+      method: "eth_getEncryptionPublicKey",
+      params: [account],
+    });
+  };
+
+  const encrypt = (data) => {
+    getEncryptionPublicKey(accounts[0])
       .then((result) => {
         const message = ethUtil.bufferToHex(
           Buffer.from(
             JSON.stringify(
               sigUtil.encrypt({
                 publicKey: result,
-                data: "hello world!",
+                data: data,
                 version: "x25519-xsalsa20-poly1305",
               })
             ),
             "utf8"
           )
         );
+        console.log(result);
         setEncryptedMessage(message);
         console.log("Encrypted message: " + message);
       })
@@ -85,11 +93,41 @@ const App = () => {
       .then((data) => console.log(data));
   };
 
+  const isRegistered = async (walletAddress) => {
+    const response = await fetch(backEndURL + walletAddress);
+    const isRegistered = await response.text();
+    return isRegistered === "true";
+  };
+
+  const registerAccount = (walletAddress, publicKey) => {
+    const data = {
+      walletAddress: walletAddress,
+      publicKey: publicKey,
+    };
+    fetch(backEndURL + "register", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        console.log("Registration Successful:", data);
+      })
+      .catch((error) => {
+        console.error("Error:", error);
+      });
+  };
+
   return (
     <div className="App">
       <header className="App-header">
         {!loading && accounts !== null ? (
           <div>
+            <button onClick={() => registerAccount("0x0", "key")}>
+              Register
+            </button>
             <button
               onClick={() =>
                 fetchFromIPFS(
@@ -100,7 +138,7 @@ const App = () => {
             >
               Fetch File
             </button>
-            <button onClick={encrypt}>Encrypt</button>
+            <button onClick={() => encrypt("hello world!")}>Encrypt</button>
             <button onClick={decrypt}>Decrypt</button>
           </div>
         ) : null}
